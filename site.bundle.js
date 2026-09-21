@@ -48,6 +48,11 @@ function initNavMenu() {
     link.addEventListener('click', closeMenu);
   });
 
+  const closeTargets = Array.from(navToggle.querySelectorAll('[data-nav-toggle="close"]'));
+  closeTargets.forEach((closeEl) => {
+    closeEl.addEventListener('click', closeMenu);
+  });
+
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && isOpen()) closeMenu();
   });
