@@ -57,7 +57,7 @@ function initNavMenu() {
     isOpen = true;
     hamburger.setAttribute('data-nav-open', 'true');
     document.body.style.overflow = 'hidden';
-    if (window.lenis) window.lenis.stop();
+    lenis.stop();
     tl.play();
   }
 
@@ -65,7 +65,7 @@ function initNavMenu() {
     isOpen = false;
     hamburger.setAttribute('data-nav-open', 'false');
     document.body.style.overflow = '';
-    if (window.lenis) window.lenis.start();
+    lenis.start();
     tl.reverse();
   }
 
