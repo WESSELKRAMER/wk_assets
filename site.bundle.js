@@ -75,6 +75,7 @@
     initMenuGrow();
     initTabsReveal();
     initPersistentPixelFaces();
+    initScrambleHover(document, persistentScope, true);
   }
 
   function initBeforeEnterFunctions(next) {
@@ -87,6 +88,7 @@
       if (!reducedMotion && has("[data-scramble]")) {
         gsap.set(nextPage.querySelectorAll("[data-scramble]"), { autoAlpha: 0 });
       }
+      if (has('[data-scramble="hover"]')) initScrambleHover(nextPage, scope, false);
       if (has("[data-align-menu-bottom]")) initAlignToMenu(nextPage, scope);
       if (has("[data-cascading-slider-wrap]")) initCascadingSlider(nextPage, scope);
       if (has("[data-card-hand]")) {
@@ -521,6 +523,43 @@
           speed: 0.85
         },
         onComplete: () => split.revert()
+      });
+    });
+  }
+
+  function initScrambleHover(root, scope, onlyPersistent) {
+    if (reducedMotion || typeof ScrambleTextPlugin === "undefined") return;
+    if (!window.matchMedia("(hover: hover) and (pointer: fine)").matches) return;
+
+    root.querySelectorAll('[data-scramble="hover"]').forEach((el) => {
+      if (onlyPersistent && !isPersistent(el)) return;
+      if (el.hasAttribute("data-scramble-ready")) return;
+
+      el.setAttribute("data-scramble-ready", "");
+      scope.cleanups.push(() => el.removeAttribute("data-scramble-ready"));
+
+      const original = el.textContent;
+      const trigger = el.closest("[data-scramble-trigger], a, button") || el;
+      const duration = parseFloat(el.dataset.scrambleDuration) || 0.6;
+      const chars = el.dataset.scrambleChars || "upperCase";
+      let tween;
+
+      listen(scope, trigger, "mouseenter", () => {
+        if (tween && tween.isActive()) return;
+        tween = gsap.to(el, {
+          duration: duration,
+          ease: "none",
+          scrambleText: {
+            text: original,
+            chars: chars,
+            speed: 0.85
+          }
+        });
+      });
+
+      scope.cleanups.push(() => {
+        tween?.kill();
+        el.textContent = original;
       });
     });
   }
@@ -1252,6 +1291,8 @@
     const tilt = parseFloat(hand.dataset.cardHandRotate) || 7;
     const openScale = parseFloat(hand.dataset.cardHandScale) || 1.12;
     const activeScale = parseFloat(hand.dataset.cardHandActiveScale) || 1.3;
+    const dropAttr = parseFloat(hand.dataset.cardHandDrop);
+    const drop = isNaN(dropAttr) ? 0.06 : dropAttr;
     const canHover = window.matchMedia("(hover: hover) and (pointer: fine)").matches;
 
     cards.forEach((card, i) => {
@@ -1275,7 +1316,7 @@
         let delay = "0s";
 
         if (!open) {
-          transform = `translateX(${i * w * 0.093}px) scale(${1 - i * 0.08})`;
+          transform = `translateX(${i * w * 0.093}px) translateY(${i * w * drop}px) scale(${1 - i * 0.08})`;
           zIndex = total - i;
           filter = `brightness(${1 + i * 0.06})`;
         } else {
