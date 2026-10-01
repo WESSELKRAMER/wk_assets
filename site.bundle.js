@@ -84,6 +84,9 @@
     scope.beforeEnterDone = true;
 
     scope.ctx.add(() => {
+      if (!reducedMotion && has("[data-scramble]")) {
+        gsap.set(nextPage.querySelectorAll("[data-scramble]"), { autoAlpha: 0 });
+      }
       if (has("[data-align-menu-bottom]")) initAlignToMenu(nextPage, scope);
       if (has("[data-cascading-slider-wrap]")) initCascadingSlider(nextPage, scope);
       if (has("[data-card-hand]")) {
@@ -490,6 +493,15 @@
   }
 
   function initScrambleOnLoad(container) {
+    const fadeTargets = container.querySelectorAll("[data-scramble]");
+    if (fadeTargets.length) {
+      if (reducedMotion) {
+        gsap.set(fadeTargets, { autoAlpha: 1 });
+      } else {
+        gsap.to(fadeTargets, { autoAlpha: 1, duration: 0.25, ease: "power1.out", overwrite: "auto" });
+      }
+    }
+
     if (reducedMotion || typeof ScrambleTextPlugin === "undefined") return;
 
     container.querySelectorAll('[data-scramble="load"]').forEach((target) => {
