@@ -144,6 +144,8 @@
     const overlap = Math.max(0, Math.min(1, pixelOverlap));
     const clipFrom = isPortrait ? "polygon(0% 0%, 100% 0%, 100% 0%, 0% 0%)" : "polygon(0% 0%, 0% 0%, 0% 100%, 0% 100%)";
     const clipTo = isPortrait ? "polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%)" : "polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%)";
+    const clipOutFrom = "polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%)";
+    const clipOutTo = isPortrait ? "polygon(0% 100%, 100% 100%, 100% 100%, 0% 100%)" : "polygon(100% 0%, 100% 0%, 100% 100%, 100% 100%)";
     const clipStart = Math.min(pixelFadeDuration, transitionDuration * 0.5);
     const clipDuration = Math.max(0.001, transitionDuration - 2 * clipStart);
     const stepDur = clipDuration / Math.max(1, pixelHorizontalAmount);
@@ -159,6 +161,12 @@
       willChange: "clip-path",
       force3D: true,
       maxHeight: "100dvh"
+    });
+
+    gsap.set(current, {
+      clipPath: clipOutFrom,
+      webkitClipPath: clipOutFrom,
+      willChange: "clip-path"
     });
 
     lines.forEach((line, i) => {
@@ -196,6 +204,13 @@
     tl.to(next, {
       clipPath: clipTo,
       webkitClipPath: clipTo,
+      ease: `steps(${pixelHorizontalAmount}, start)`,
+      duration: clipDuration
+    }, clipStart);
+
+    tl.to(current, {
+      clipPath: clipOutTo,
+      webkitClipPath: clipOutTo,
       ease: `steps(${pixelHorizontalAmount}, start)`,
       duration: clipDuration
     }, clipStart);
