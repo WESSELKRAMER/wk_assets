@@ -74,6 +74,7 @@
 
     initMenuGrow();
     initTabsReveal();
+    initPersistentPixelFaces();
   }
 
   function initBeforeEnterFunctions(next) {
@@ -83,6 +84,9 @@
     scope.ctx.add(() => {
       if (has("[data-align-menu-bottom]")) initAlignToMenu(nextPage, scope);
       if (has("[data-cascading-slider-wrap]")) initCascadingSlider(nextPage, scope);
+      if (has("[data-pixel-face]")) {
+        nextPage.querySelectorAll("[data-pixel-face]").forEach((face) => initPixelFace(face, scope));
+      }
     });
   }
 
@@ -1210,6 +1214,107 @@
 
     initOnceFunctions();
     initAfterEnterFunctions(container);
+  }
+
+  const persistentScope = { cleanups: [] };
+
+  function initPersistentPixelFaces() {
+    document.querySelectorAll("[data-pixel-face]").forEach((face) => {
+      if (isPersistent(face)) initPixelFace(face, persistentScope);
+    });
+  }
+
+  function initPixelFace(face, scope) {
+    if (face.hasAttribute("data-pixel-face-ready")) return;
+
+    let eyes = Array.from(face.querySelectorAll("[data-face-eye]"));
+    if (!eyes.length) eyes = Array.from(face.querySelectorAll(".eye_l, .eye_r"));
+    const mouth = face.querySelector("[data-face-mouth]") || face.querySelector(".mouth");
+    if (!eyes.length || reducedMotion) return;
+
+    face.setAttribute("data-pixel-face-ready", "");
+    scope.cleanups.push(() => face.removeAttribute("data-pixel-face-ready"));
+
+    const snap = face.getAttribute("data-pixel-face-snap") === "true";
+    const eyeRange = parseFloat(face.getAttribute("data-pixel-face-range")) || 1;
+    const canHover = window.matchMedia("(hover: hover) and (pointer: fine)").matches;
+
+    gsap.set(eyes, { transformOrigin: "50% 50%" });
+
+    let blinkCall;
+    const blink = () => {
+      const tl = gsap.timeline();
+      tl.to(eyes, { scaleY: 0.3, duration: 0.05, ease: "none" })
+        .to(eyes, { scaleY: 1, duration: 0.07, ease: "none" }, "+=0.07");
+      if (Math.random() < 0.2) {
+        tl.to(eyes, { scaleY: 0.3, duration: 0.05, ease: "none" }, "+=0.12")
+          .to(eyes, { scaleY: 1, duration: 0.07, ease: "none" }, "+=0.07");
+      }
+      blinkCall = gsap.delayedCall(gsap.utils.random(2.5, 6), blink);
+    };
+    blinkCall = gsap.delayedCall(gsap.utils.random(1.5, 4), blink);
+
+    const quick = (targets, prop) => {
+      const list = Array.isArray(targets) ? targets : [targets];
+      const setters = list.filter(Boolean).map((el) => gsap.quickTo(el, prop, { duration: 0.5, ease: "power3.out" }));
+      return (value) => setters.forEach((set) => set(value));
+    };
+
+    const eyesX = quick(eyes, "x");
+    const eyesY = quick(eyes, "y");
+    const mouthX = quick(mouth, "x");
+    const mouthY = quick(mouth, "y");
+
+    const unit = () => eyes[0].offsetWidth || 4;
+    const snapTo = (value, u) => (snap ? Math.round(value / u) * u : value);
+
+    const lookAt = (nx, ny) => {
+      const u = unit();
+      eyesX(snapTo(nx * u * eyeRange, u));
+      eyesY(snapTo(ny * u * eyeRange * 0.7, u));
+      mouthX(snapTo(nx * u * eyeRange * 0.4, u));
+      mouthY(snapTo(ny * u * eyeRange * 0.25, u));
+    };
+
+    let idleCall;
+    const glance = () => {
+      lookAt(gsap.utils.random(-1, 1), gsap.utils.random(-0.6, 0.6));
+      idleCall = gsap.delayedCall(gsap.utils.random(0.6, 1.2), () => {
+        lookAt(0, 0);
+        idleCall = gsap.delayedCall(gsap.utils.random(2.5, 5), glance);
+      });
+    };
+    const scheduleIdle = (delay) => {
+      idleCall?.kill();
+      idleCall = gsap.delayedCall(delay, glance);
+    };
+
+    scheduleIdle(canHover ? 4 : 2);
+
+    if (canHover) {
+      listen(scope, window, "pointermove", (event) => {
+        if (event.pointerType && event.pointerType !== "mouse") return;
+        const rect = face.getBoundingClientRect();
+        const dx = event.clientX - (rect.left + rect.width / 2);
+        const dy = event.clientY - (rect.top + rect.height / 2);
+        const nx = gsap.utils.clamp(-1, 1, dx / (window.innerWidth / 2));
+        const ny = gsap.utils.clamp(-1, 1, dy / (window.innerHeight / 2));
+        lookAt(nx, ny);
+        scheduleIdle(4);
+      });
+
+      listen(scope, document, "mouseleave", () => {
+        lookAt(0, 0);
+        scheduleIdle(2);
+      });
+    }
+
+    scope.cleanups.push(() => {
+      blinkCall?.kill();
+      idleCall?.kill();
+      gsap.killTweensOf([...eyes, mouth].filter(Boolean));
+      gsap.set([...eyes, mouth].filter(Boolean), { clearProps: "transform" });
+    });
   }
 
   function startWithoutBarba(reason) {
