@@ -977,9 +977,9 @@
   const THEME_DURATION = 1;
   let themeWarningShown = false;
 
-  function getThemeVarNames() {
+  function getThemeVarNames(el) {
     const names = [];
-    const computed = getComputedStyle(document.body);
+    const computed = getComputedStyle(el);
     for (let i = 0; i < computed.length; i++) {
       const name = computed[i];
       if (name.startsWith(THEME_VAR_PREFIX)) names.push(name);
@@ -987,42 +987,108 @@
     return names;
   }
 
-  function syncBodyTheme(data) {
-    const body = document.body;
+  function isSyncAttribute(name) {
+    return name === "class" || name === "aria-current" || name.startsWith("data-wf--");
+  }
+
+  function getSyncAttributes(el) {
+    const attrs = {};
+    Array.from(el.attributes).forEach((attr) => {
+      if (isSyncAttribute(attr.name)) attrs[attr.name] = attr.value;
+    });
+    return attrs;
+  }
+
+  function sameAttributes(a, b) {
+    const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+    for (const key of keys) {
+      if (a[key] !== b[key]) return false;
+    }
+    return true;
+  }
+
+  function applyAttributes(el, current, next) {
+    Object.keys(current).forEach((key) => {
+      if (!(key in next)) el.removeAttribute(key);
+    });
+    Object.keys(next).forEach((key) => el.setAttribute(key, next[key]));
+  }
+
+  function getPersistentTargets(root) {
+    const list = [];
+    root.querySelectorAll("[data-barba-update]").forEach((el) => {
+      if (el.closest('[data-barba="container"]')) return;
+      list.push(el);
+      if (el.getAttribute("data-barba-update") === "deep") {
+        list.push(...el.querySelectorAll("*"));
+      }
+    });
+    return Array.from(new Set(list));
+  }
+
+  function syncTheme(data) {
     const dom = new DOMParser().parseFromString(data.next.html, "text/html");
-    const nextClass = dom.body.getAttribute("class") || "";
-    const currentClass = body.getAttribute("class") || "";
-    if (nextClass === currentClass) return;
 
-    const names = getThemeVarNames();
-
-    if (!names.length && !themeWarningShown) {
-      themeWarningShown = true;
-      console.warn(`[main.js] No CSS variables starting with "${THEME_VAR_PREFIX}" found on body, theme switches without animation`);
+    const pairs = [];
+    const bodyCurrent = { class: document.body.getAttribute("class") || "" };
+    const bodyNext = { class: dom.body.getAttribute("class") || "" };
+    if (bodyCurrent.class !== bodyNext.class) {
+      pairs.push({ el: document.body, current: bodyCurrent, next: bodyNext });
     }
 
-    const fromStyle = getComputedStyle(body);
-    const from = {};
-    names.forEach((name) => (from[name] = fromStyle.getPropertyValue(name).trim()));
-
-    gsap.killTweensOf(body);
-    names.forEach((name) => body.style.removeProperty(name));
-    body.setAttribute("class", nextClass);
-
-    if (reducedMotion || !names.length) return;
-
-    const toStyle = getComputedStyle(body);
-    const to = {};
-    names.forEach((name) => {
-      to[name] = toStyle.getPropertyValue(name).trim();
-      body.style.setProperty(name, from[name]);
+    const currentTargets = getPersistentTargets(document);
+    const nextTargets = getPersistentTargets(dom);
+    currentTargets.forEach((el, i) => {
+      const nextEl = nextTargets[i];
+      if (!nextEl) return;
+      const current = getSyncAttributes(el);
+      const next = getSyncAttributes(nextEl);
+      if (!sameAttributes(current, next)) pairs.push({ el, current, next });
     });
 
-    gsap.to(body, {
-      ...to,
-      duration: THEME_DURATION,
-      ease: "power2.inOut",
-      onComplete: () => names.forEach((name) => body.style.removeProperty(name))
+    if (!pairs.length) return;
+
+    const elements = pairs.map((pair) => pair.el);
+    gsap.killTweensOf(elements);
+
+    pairs.forEach((pair) => {
+      pair.names = getThemeVarNames(pair.el);
+      const style = getComputedStyle(pair.el);
+      pair.from = {};
+      pair.names.forEach((name) => (pair.from[name] = style.getPropertyValue(name).trim()));
+    });
+
+    if (!themeWarningShown && !pairs.some((pair) => pair.names.length)) {
+      themeWarningShown = true;
+      console.warn(`[main.js] No CSS variables starting with "${THEME_VAR_PREFIX}" found, theme switches without animation`);
+    }
+
+    pairs.forEach((pair) => {
+      pair.names.forEach((name) => pair.el.style.removeProperty(name));
+      applyAttributes(pair.el, pair.current, pair.next);
+    });
+
+    if (reducedMotion) return;
+
+    pairs.forEach((pair) => {
+      const style = getComputedStyle(pair.el);
+      pair.to = {};
+      pair.names.forEach((name) => {
+        const value = style.getPropertyValue(name).trim();
+        if (value && value !== pair.from[name]) pair.to[name] = value;
+      });
+    });
+
+    pairs.forEach((pair) => {
+      const changed = Object.keys(pair.to);
+      if (!changed.length) return;
+      changed.forEach((name) => pair.el.style.setProperty(name, pair.from[name]));
+      gsap.to(pair.el, {
+        ...pair.to,
+        duration: THEME_DURATION,
+        ease: "power2.inOut",
+        onComplete: () => changed.forEach((name) => pair.el.style.removeProperty(name))
+      });
     });
   }
 
@@ -1048,7 +1114,7 @@
       lenis.stop();
     }
 
-    syncBodyTheme(data);
+    syncTheme(data);
     initBeforeEnterFunctions(data.next.container);
     applyThemeFrom(data.next.container);
   });
@@ -1058,10 +1124,6 @@
       ScrollTrigger.getAll().forEach((trigger) => trigger.kill());
     }
     destroyScope(data.current.container);
-  });
-
-  barba.hooks.enter((data) => {
-    initBarbaNavUpdate(data);
   });
 
   barba.hooks.afterEnter((data) => {
