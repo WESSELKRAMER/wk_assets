@@ -80,6 +80,8 @@
   function initBeforeEnterFunctions(next) {
     nextPage = next || document;
     const scope = getScope(nextPage);
+    if (scope.beforeEnterDone) return;
+    scope.beforeEnterDone = true;
 
     scope.ctx.add(() => {
       if (has("[data-align-menu-bottom]")) initAlignToMenu(nextPage, scope);
@@ -94,6 +96,8 @@
     nextPage = next || document;
     const container = nextPage;
     const scope = getScope(container);
+    if (scope.afterEnterDone) return;
+    scope.afterEnterDone = true;
 
     document.fonts.ready.then(() => {
       if (container !== document && !container.isConnected) return;
@@ -709,10 +713,12 @@
 
     function setupInstance(wrapper) {
       const viewport = wrapper.querySelector("[data-cascading-viewport]");
-      if (!viewport) return;
+      if (!viewport || wrapper.hasAttribute("data-cascading-ready")) return;
+      wrapper.setAttribute("data-cascading-ready", "");
 
       const prevButton = wrapper.querySelector("[data-cascading-slider-prev]") || container.querySelector("[data-cascading-slider-prev]");
       const nextButton = wrapper.querySelector("[data-cascading-slider-next]") || container.querySelector("[data-cascading-slider-next]");
+      viewport.querySelectorAll("[data-cascading-slide][data-clone]").forEach((clone) => clone.remove());
       const slides = Array.from(viewport.querySelectorAll("[data-cascading-slide]"));
       const originalTotal = slides.length;
       let totalSlides = slides.length;
