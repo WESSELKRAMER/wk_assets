@@ -434,7 +434,7 @@
       const duration = parseFloat(wrapper.dataset.tabsRevealDuration);
       const stagger = parseFloat(wrapper.dataset.tabsRevealStagger);
       const delay = parseFloat(wrapper.dataset.tabsRevealDelay);
-      const bounce = parseFloat(wrapper.dataset.tabsRevealBounce);
+      const ease = wrapper.dataset.tabsRevealEase || "expo.out";
 
       gsap.set(wrapper, { clipPath: "inset(-100vh -100vw 0 -100vw)" });
 
@@ -443,7 +443,7 @@
         duration: isNaN(duration) ? 0.9 : duration,
         stagger: isNaN(stagger) ? 0.1 : stagger,
         delay: isNaN(delay) ? 0.3 : delay,
-        ease: `back.out(${isNaN(bounce) ? 1.6 : bounce})`,
+        ease: ease,
         clearProps: "transform",
         onComplete: () => gsap.set(wrapper, { clearProps: "clipPath" })
       });
