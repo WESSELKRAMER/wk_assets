@@ -1092,13 +1092,123 @@
     });
   }
 
+  const loaderMinDuration = 0.4;
+  const loaderMaxWait = 3;
+
+  function waitForPageReady(maxWait) {
+    const loaded = document.readyState === "complete"
+      ? Promise.resolve()
+      : new Promise((resolve) => window.addEventListener("load", resolve, { once: true }));
+    const fonts = document.fonts ? document.fonts.ready : Promise.resolve();
+    const timeout = new Promise((resolve) => setTimeout(resolve, maxWait * 1000));
+    return Promise.race([Promise.all([loaded, fonts]), timeout]);
+  }
+
+  async function runPageLoader() {
+    const wrap = document.querySelector("[data-transition-wrap]");
+    if (!wrap || !wrap.hasAttribute("data-loader")) return;
+
+    const panel = wrap.querySelector("[data-transition-panel]");
+
+    const finish = () => {
+      wrap.removeAttribute("data-loader");
+      wrap.style.removeProperty("--loader-clip");
+      if (panel) gsap.set(panel, { opacity: 0 });
+    };
+
+    await Promise.all([
+      waitForPageReady(loaderMaxWait),
+      new Promise((resolve) => setTimeout(resolve, loaderMinDuration * 1000))
+    ]);
+
+    if (reducedMotion || !panel) {
+      finish();
+      return;
+    }
+
+    const isPortrait = window.innerHeight > window.innerWidth;
+    pixelGrid(isPortrait);
+
+    const lines = Array.from(panel.querySelectorAll("[data-transition-col]"));
+    const allPixels = panel.querySelectorAll("[data-transition-pixel]");
+
+    const overlap = Math.max(0, Math.min(1, pixelOverlap));
+    const clipFrom = "polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%)";
+    const clipTo = isPortrait ? "polygon(0% 100%, 100% 100%, 100% 100%, 0% 100%)" : "polygon(100% 0%, 100% 0%, 100% 100%, 100% 100%)";
+    const clipStart = Math.min(pixelFadeDuration, transitionDuration * 0.5);
+    const clipDuration = Math.max(0.001, transitionDuration - 2 * clipStart);
+    const stepDur = clipDuration / Math.max(1, pixelHorizontalAmount);
+
+    gsap.set(allPixels, { opacity: 0 });
+    gsap.set(panel, { opacity: 1 });
+    wrap.style.setProperty("--loader-clip", clipFrom);
+
+    return new Promise((resolve) => {
+      const tl = gsap.timeline({
+        onComplete: () => {
+          finish();
+          resolve();
+        }
+      });
+
+      lines.forEach((line, i) => {
+        const pixels = Array.from(line.querySelectorAll("[data-transition-pixel]"));
+        if (!pixels.length) return;
+
+        const revealTime = clipStart + i * stepDur;
+        const fillStart = Math.max(0, revealTime - pixelFadeDuration);
+        const fadeStart = Math.min(transitionDuration, revealTime + stepDur);
+        const perPixelMin = pixelFadeDuration / pixels.length;
+        const perPixelDur = perPixelMin * (1 - overlap) + pixelFadeDuration * overlap;
+        const spread = Math.max(0, pixelFadeDuration - perPixelDur);
+
+        tl.to(pixels, {
+          opacity: 1,
+          duration: Math.max(0.001, perPixelDur),
+          ease: "none",
+          stagger: { amount: spread, from: "random" }
+        }, fillStart);
+
+        tl.to(pixels, {
+          opacity: 0,
+          duration: Math.max(0.001, perPixelDur),
+          ease: "none",
+          stagger: { amount: spread, from: "random" }
+        }, fadeStart);
+      });
+
+      tl.to(wrap, {
+        "--loader-clip": clipTo,
+        ease: `steps(${pixelHorizontalAmount}, start)`,
+        duration: clipDuration
+      }, clipStart);
+
+      tl.call(resolve, null, clipStart + clipDuration * 0.6);
+    });
+  }
+
+  async function startFirstPage(container) {
+    initLenis();
+    initBeforeEnterFunctions(container);
+    applyThemeFrom(container === document ? null : container);
+    if (container !== document) runPageOnceAnimation(container);
+
+    try {
+      await runPageLoader();
+    } catch (error) {
+      console.warn(error);
+      const wrap = document.querySelector("[data-transition-wrap]");
+      if (wrap) wrap.removeAttribute("data-loader");
+    }
+
+    initOnceFunctions();
+    initAfterEnterFunctions(container);
+  }
+
   function startWithoutBarba(reason) {
     console.warn("[main.js] Barba disabled: " + reason);
     const container = document.querySelector('[data-barba="container"]') || document;
-    initOnceFunctions();
-    initBeforeEnterFunctions(container);
-    applyThemeFrom(container === document ? null : container);
-    initAfterEnterFunctions(container);
+    startFirstPage(container);
   }
 
   function startWithBarba() {
@@ -1150,12 +1260,7 @@
         sync: true,
 
         async once(data) {
-          initOnceFunctions();
-          initBeforeEnterFunctions(data.next.container);
-          applyThemeFrom(data.next.container);
-          const tl = runPageOnceAnimation(data.next.container);
-          initAfterEnterFunctions(data.next.container);
-          return tl;
+          await startFirstPage(data.next.container);
         },
 
         async leave(data) {
