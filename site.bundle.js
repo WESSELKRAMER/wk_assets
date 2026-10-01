@@ -1,8 +1,9 @@
 (function () {
   "use strict";
 
-  if (typeof gsap === "undefined" || typeof barba === "undefined") {
-    console.warn("GSAP or Barba not found");
+  function boot() {
+  if (typeof gsap === "undefined") {
+    console.warn("[main.js] GSAP not found");
     return;
   }
 
@@ -274,75 +275,6 @@
     });
   }
 
-  barba.hooks.beforeEnter((data) => {
-    gsap.set(data.next.container, {
-      position: "fixed",
-      top: 0,
-      left: 0,
-      right: 0
-    });
-
-    if (lenis && typeof lenis.stop === "function") {
-      lenis.stop();
-    }
-
-    initBeforeEnterFunctions(data.next.container);
-    applyThemeFrom(data.next.container);
-  });
-
-  barba.hooks.afterLeave((data) => {
-    if (hasScrollTrigger) {
-      ScrollTrigger.getAll().forEach((trigger) => trigger.kill());
-    }
-    destroyScope(data.current.container);
-  });
-
-  barba.hooks.enter((data) => {
-    initBarbaNavUpdate(data);
-  });
-
-  barba.hooks.afterEnter((data) => {
-    resetWebflow(data);
-    initAfterEnterFunctions(data.next.container);
-
-    if (hasLenis && lenis) {
-      lenis.resize();
-      lenis.start();
-    }
-
-    if (hasScrollTrigger) {
-      ScrollTrigger.refresh();
-    }
-  });
-
-  barba.init({
-    debug: true,
-    timeout: 7000,
-    preventRunning: true,
-    transitions: [
-      {
-        name: "default",
-        sync: true,
-
-        async once(data) {
-          initOnceFunctions();
-          initBeforeEnterFunctions(data.next.container);
-          applyThemeFrom(data.next.container);
-          const tl = runPageOnceAnimation(data.next.container);
-          initAfterEnterFunctions(data.next.container);
-          return tl;
-        },
-
-        async leave(data) {
-          return runPageLeaveAnimation(data.current.container, data.next.container);
-        },
-
-        async enter(data) {
-          return runPageEnterAnimation(data.next.container);
-        }
-      }
-    ]
-  });
 
   const themeConfig = {
     light: {
@@ -1025,5 +957,105 @@
       layout(false);
       updateCounter(false);
     }
+  }
+  function startWithoutBarba(reason) {
+    console.warn("[main.js] Barba disabled: " + reason);
+    const container = document.querySelector('[data-barba="container"]') || document;
+    initOnceFunctions();
+    initBeforeEnterFunctions(container);
+    applyThemeFrom(container === document ? null : container);
+    initAfterEnterFunctions(container);
+  }
+
+  function startWithBarba() {
+  barba.hooks.beforeEnter((data) => {
+    gsap.set(data.next.container, {
+      position: "fixed",
+      top: 0,
+      left: 0,
+      right: 0
+    });
+
+    if (lenis && typeof lenis.stop === "function") {
+      lenis.stop();
+    }
+
+    initBeforeEnterFunctions(data.next.container);
+    applyThemeFrom(data.next.container);
+  });
+
+  barba.hooks.afterLeave((data) => {
+    if (hasScrollTrigger) {
+      ScrollTrigger.getAll().forEach((trigger) => trigger.kill());
+    }
+    destroyScope(data.current.container);
+  });
+
+  barba.hooks.enter((data) => {
+    initBarbaNavUpdate(data);
+  });
+
+  barba.hooks.afterEnter((data) => {
+    resetWebflow(data);
+    initAfterEnterFunctions(data.next.container);
+
+    if (hasLenis && lenis) {
+      lenis.resize();
+      lenis.start();
+    }
+
+    if (hasScrollTrigger) {
+      ScrollTrigger.refresh();
+    }
+  });
+
+  barba.init({
+    debug: true,
+    timeout: 7000,
+    preventRunning: true,
+    transitions: [
+      {
+        name: "default",
+        sync: true,
+
+        async once(data) {
+          initOnceFunctions();
+          initBeforeEnterFunctions(data.next.container);
+          applyThemeFrom(data.next.container);
+          const tl = runPageOnceAnimation(data.next.container);
+          initAfterEnterFunctions(data.next.container);
+          return tl;
+        },
+
+        async leave(data) {
+          return runPageLeaveAnimation(data.current.container, data.next.container);
+        },
+
+        async enter(data) {
+          return runPageEnterAnimation(data.next.container);
+        }
+      }
+    ]
+  });
+  }
+
+  if (typeof barba === "undefined") {
+    startWithoutBarba("barba.js not loaded");
+  } else if (!document.querySelector('[data-barba="wrapper"]') || !document.querySelector('[data-barba="container"]')) {
+    startWithoutBarba('no [data-barba="wrapper"] or [data-barba="container"] found');
+  } else {
+    try {
+      startWithBarba();
+    } catch (error) {
+      console.error(error);
+      startWithoutBarba("barba.init failed");
+    }
+  }
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", boot);
+  } else {
+    boot();
   }
 })();
