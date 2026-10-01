@@ -1238,6 +1238,8 @@
     const mid = (total - 1) / 2;
     const spread = parseFloat(hand.dataset.cardHandSpread) || 0.52;
     const tilt = parseFloat(hand.dataset.cardHandRotate) || 7;
+    const openScale = parseFloat(hand.dataset.cardHandScale) || 1.12;
+    const activeScale = parseFloat(hand.dataset.cardHandActiveScale) || 1.3;
     const canHover = window.matchMedia("(hover: hover) and (pointer: fine)").matches;
 
     cards.forEach((card, i) => {
@@ -1268,7 +1270,7 @@
           const d = i - mid;
           const isActive = i === active;
           const lift = isActive ? -w * 0.147 : 0;
-          transform = `translateX(${i * w * spread}px) translateY(${Math.abs(d) * w * 0.047 + lift}px) rotate(${d * tilt}deg) scale(${isActive ? 1.06 : 1})`;
+          transform = `translateX(${i * w * spread * openScale}px) translateY(${Math.abs(d) * w * 0.047 + lift}px) rotate(${d * tilt}deg) scale(${isActive ? activeScale : openScale})`;
           zIndex = isActive ? 50 : 10 + i;
           delay = `${i * 0.03}s`;
           if (active > -1 && !isActive) filter = "brightness(0.92)";
