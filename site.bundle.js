@@ -86,6 +86,9 @@
     scope.ctx.add(() => {
       if (has("[data-align-menu-bottom]")) initAlignToMenu(nextPage, scope);
       if (has("[data-cascading-slider-wrap]")) initCascadingSlider(nextPage, scope);
+      if (has("[data-card-hand]")) {
+        nextPage.querySelectorAll("[data-card-hand]").forEach((hand) => initCardHand(hand, scope));
+      }
       if (has("[data-pixel-face]")) {
         nextPage.querySelectorAll("[data-pixel-face]").forEach((face) => initPixelFace(face, scope));
       }
@@ -1220,6 +1223,119 @@
 
     initOnceFunctions();
     initAfterEnterFunctions(container);
+  }
+
+  function initCardHand(hand, scope) {
+    if (hand.hasAttribute("data-card-hand-ready")) return;
+
+    const cards = Array.from(hand.querySelectorAll("[data-card-hand-item]"));
+    if (!cards.length) return;
+
+    hand.setAttribute("data-card-hand-ready", "");
+    scope.cleanups.push(() => hand.removeAttribute("data-card-hand-ready"));
+
+    const total = cards.length;
+    const mid = (total - 1) / 2;
+    const spread = parseFloat(hand.dataset.cardHandSpread) || 0.52;
+    const tilt = parseFloat(hand.dataset.cardHandRotate) || 7;
+    const canHover = window.matchMedia("(hover: hover) and (pointer: fine)").matches;
+
+    cards.forEach((card, i) => {
+      if (card.querySelector(".card_hand_index")) return;
+      const index = document.createElement("span");
+      index.className = "card_hand_index";
+      index.textContent = String(i + 1).padStart(2, "0");
+      card.appendChild(index);
+    });
+
+    let open = false;
+    let active = -1;
+
+    const layout = () => {
+      const w = cards[0].offsetWidth || 150;
+
+      cards.forEach((card, i) => {
+        let transform;
+        let zIndex;
+        let filter = "none";
+        let delay = "0s";
+
+        if (!open) {
+          transform = `translateX(${i * w * 0.093}px) scale(${1 - i * 0.08})`;
+          zIndex = total - i;
+          filter = `brightness(${1 + i * 0.06})`;
+        } else {
+          const d = i - mid;
+          const isActive = i === active;
+          const lift = isActive ? -w * 0.147 : 0;
+          transform = `translateX(${i * w * spread}px) translateY(${Math.abs(d) * w * 0.047 + lift}px) rotate(${d * tilt}deg) scale(${isActive ? 1.06 : 1})`;
+          zIndex = isActive ? 50 : 10 + i;
+          delay = `${i * 0.03}s`;
+          if (active > -1 && !isActive) filter = "brightness(0.92)";
+        }
+
+        card.style.transform = transform;
+        card.style.zIndex = zIndex;
+        card.style.filter = filter;
+        card.style.transitionDelay = delay;
+      });
+
+      hand.classList.toggle("is-open", open);
+    };
+
+    if (canHover) {
+      listen(scope, hand, "mouseenter", () => {
+        open = true;
+        layout();
+      });
+      listen(scope, hand, "mouseleave", () => {
+        open = false;
+        active = -1;
+        layout();
+      });
+      cards.forEach((card, i) => {
+        listen(scope, card, "mouseenter", () => {
+          active = i;
+          layout();
+        });
+        listen(scope, card, "mouseleave", () => {
+          active = -1;
+          layout();
+        });
+      });
+    } else {
+      cards.forEach((card, i) => {
+        listen(scope, card, "click", (event) => {
+          if (!open) {
+            event.preventDefault();
+            open = true;
+          } else if (active !== i) {
+            event.preventDefault();
+            active = i;
+          }
+          event.stopPropagation();
+          layout();
+        });
+      });
+      listen(scope, document, "click", () => {
+        if (!open) return;
+        open = false;
+        active = -1;
+        layout();
+      });
+    }
+
+    listen(scope, window, "resize", layout);
+    layout();
+
+    scope.cleanups.push(() => {
+      cards.forEach((card) => {
+        card.style.removeProperty("transform");
+        card.style.removeProperty("z-index");
+        card.style.removeProperty("filter");
+        card.style.removeProperty("transition-delay");
+      });
+    });
   }
 
   const persistentScope = { cleanups: [] };
