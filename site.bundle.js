@@ -1,7 +1,459 @@
 (function () {
   "use strict";
 
-  function initMenuGrow(reduceMotion) {
+  if (typeof gsap === "undefined" || typeof barba === "undefined") {
+    console.warn("GSAP or Barba not found");
+    return;
+  }
+
+  const plugins = [];
+  if (typeof ScrollTrigger !== "undefined") plugins.push(ScrollTrigger);
+  if (typeof SplitText !== "undefined") plugins.push(SplitText);
+  if (typeof ScrambleTextPlugin !== "undefined") plugins.push(ScrambleTextPlugin);
+  if (typeof CustomEase !== "undefined") plugins.push(CustomEase);
+  gsap.registerPlugin(...plugins);
+
+  history.scrollRestoration = "manual";
+
+  let lenis = null;
+  let nextPage = document;
+  let onceFunctionsInitialized = false;
+
+  const hasLenis = typeof window.Lenis !== "undefined";
+  const hasScrollTrigger = typeof ScrollTrigger !== "undefined";
+  const hasCustomEase = typeof CustomEase !== "undefined";
+
+  const rmMQ = window.matchMedia("(prefers-reduced-motion: reduce)");
+  let reducedMotion = rmMQ.matches;
+  rmMQ.addEventListener?.("change", (e) => (reducedMotion = e.matches));
+  rmMQ.addListener?.((e) => (reducedMotion = e.matches));
+
+  const has = (s) => !!nextPage.querySelector(s);
+
+  let staggerDefault = 0.05;
+  let durationDefault = 0.6;
+
+  if (hasCustomEase) CustomEase.create("osmo", "0.625, 0.05, 0, 1");
+  gsap.defaults({ ease: hasCustomEase ? "osmo" : "power3.inOut", duration: durationDefault });
+
+  const pageScopes = new WeakMap();
+
+  function getScope(container) {
+    let scope = pageScopes.get(container);
+    if (!scope) {
+      scope = { ctx: gsap.context(() => {}), cleanups: [] };
+      pageScopes.set(container, scope);
+    }
+    return scope;
+  }
+
+  function destroyScope(container) {
+    const scope = pageScopes.get(container);
+    if (!scope) return;
+    scope.cleanups.forEach((fn) => {
+      try {
+        fn();
+      } catch (error) {
+        console.warn(error);
+      }
+    });
+    scope.ctx.revert();
+    pageScopes.delete(container);
+  }
+
+  function listen(scope, target, type, handler, options) {
+    target.addEventListener(type, handler, options);
+    scope.cleanups.push(() => target.removeEventListener(type, handler, options));
+  }
+
+  function initOnceFunctions() {
+    initLenis();
+    if (onceFunctionsInitialized) return;
+    onceFunctionsInitialized = true;
+
+    initMenuGrow();
+    initTabsReveal();
+  }
+
+  function initBeforeEnterFunctions(next) {
+    nextPage = next || document;
+    const scope = getScope(nextPage);
+
+    scope.ctx.add(() => {
+      if (has("[data-align-menu-bottom]")) initAlignToMenu(nextPage, scope);
+      if (has("[data-cascading-slider-wrap]")) initCascadingSlider(nextPage, scope);
+    });
+  }
+
+  function initAfterEnterFunctions(next) {
+    nextPage = next || document;
+    const container = nextPage;
+    const scope = getScope(container);
+
+    document.fonts.ready.then(() => {
+      if (container !== document && !container.isConnected) return;
+      scope.ctx.add(() => {
+        initScrambleOnLoad(container);
+        initMaskTextScrollReveal(container);
+        initHighlightMarkerTextReveal(container, scope);
+      });
+    });
+
+    if (hasLenis && lenis) {
+      lenis.resize();
+    }
+
+    if (hasScrollTrigger) {
+      ScrollTrigger.refresh();
+    }
+  }
+
+  const pixelHorizontalAmount = 12;
+  const transitionDuration = 1;
+  const pixelFadeDuration = 0.2;
+  const pixelOverlap = 0.3;
+
+  function runPageOnceAnimation(next) {
+    const tl = gsap.timeline();
+
+    tl.call(() => {
+      resetPage(next);
+    }, null, 0);
+
+    return tl;
+  }
+
+  function runPageLeaveAnimation(current, next) {
+    const tl = gsap.timeline();
+
+    if (reducedMotion) {
+      tl.set(current, { autoAlpha: 0 });
+      tl.call(() => current.remove(), null, 0);
+      return tl;
+    }
+
+    const isPortrait = window.innerHeight > window.innerWidth;
+    pixelGrid(isPortrait);
+
+    const transitionWrap = document.querySelector("[data-transition-wrap]");
+    const transitionPanel = transitionWrap.querySelector("[data-transition-panel]");
+    const lines = Array.from(transitionPanel.querySelectorAll("[data-transition-col]"));
+    const allPixels = transitionPanel.querySelectorAll("[data-transition-pixel]");
+
+    const overlap = Math.max(0, Math.min(1, pixelOverlap));
+    const clipFrom = isPortrait ? "polygon(0% 0%, 100% 0%, 100% 0%, 0% 0%)" : "polygon(0% 0%, 0% 0%, 0% 100%, 0% 100%)";
+    const clipTo = isPortrait ? "polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%)" : "polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%)";
+    const clipStart = Math.min(pixelFadeDuration, transitionDuration * 0.5);
+    const clipDuration = Math.max(0.001, transitionDuration - 2 * clipStart);
+    const stepDur = clipDuration / Math.max(1, pixelHorizontalAmount);
+    const transitionEndDelay = transitionDuration / Math.max(1, pixelHorizontalAmount);
+
+    gsap.set(allPixels, { opacity: 0, willChange: "opacity" });
+    gsap.set(transitionPanel, { opacity: 1, willChange: "opacity" });
+
+    gsap.set(next, {
+      autoAlpha: 1,
+      clipPath: clipFrom,
+      webkitClipPath: clipFrom,
+      willChange: "clip-path",
+      force3D: true,
+      maxHeight: "100dvh"
+    });
+
+    lines.forEach((line, i) => {
+      const pixels = Array.from(line.querySelectorAll("[data-transition-pixel]"));
+      if (!pixels.length) return;
+
+      const revealTime = clipStart + i * stepDur;
+      const fillStart = Math.max(0, revealTime - pixelFadeDuration);
+      const fadeStart = Math.min(transitionDuration, revealTime + stepDur);
+      const perPixelMin = pixelFadeDuration / pixels.length;
+      const perPixelDur = perPixelMin * (1 - overlap) + pixelFadeDuration * overlap;
+      const spread = Math.max(0, pixelFadeDuration - perPixelDur);
+
+      tl.to(pixels, {
+        opacity: 1,
+        duration: Math.max(0.001, perPixelDur),
+        ease: "none",
+        stagger: {
+          amount: spread,
+          from: "random"
+        }
+      }, fillStart);
+
+      tl.to(pixels, {
+        opacity: 0,
+        duration: Math.max(0.001, perPixelDur),
+        ease: "none",
+        stagger: {
+          amount: spread,
+          from: "random"
+        }
+      }, fadeStart);
+    });
+
+    tl.to(next, {
+      clipPath: clipTo,
+      webkitClipPath: clipTo,
+      ease: `steps(${pixelHorizontalAmount}, start)`,
+      duration: clipDuration
+    }, clipStart);
+
+    tl.set(next, { clearProps: "clipPath,webkitClipPath,willChange,force3D,maxHeight" }, clipStart + clipDuration);
+
+    tl.call(() => {
+      current.remove();
+    }, null, transitionDuration + transitionEndDelay);
+
+    tl.set(allPixels, { clearProps: "willChange" }, transitionDuration + transitionEndDelay);
+    tl.set(transitionPanel, { clearProps: "willChange" }, transitionDuration + transitionEndDelay);
+
+    return tl;
+  }
+
+  function runPageEnterAnimation(next) {
+    const tl = gsap.timeline();
+    const transitionEndDelay = transitionDuration / Math.max(1, pixelHorizontalAmount);
+
+    if (reducedMotion) {
+      tl.set(next, { autoAlpha: 1 });
+      tl.add("pageReady");
+      tl.call(resetPage, [next], "pageReady");
+      return new Promise((resolve) => tl.call(resolve, null, "pageReady"));
+    }
+
+    tl.add("pageReady", transitionDuration + transitionEndDelay);
+    tl.call(resetPage, [next], "pageReady");
+
+    return new Promise((resolve) => {
+      tl.call(resolve, null, "pageReady");
+    });
+  }
+
+  function pixelGrid(isPortrait) {
+    const panel = document.querySelector("[data-transition-panel]");
+    if (!panel) return;
+
+    const rect = panel.getBoundingClientRect();
+    panel.style.flexDirection = isPortrait ? "column" : "row";
+
+    const lineSizePx = isPortrait ? rect.height / pixelHorizontalAmount : rect.width / pixelHorizontalAmount;
+    const crossAmount = Math.ceil((isPortrait ? rect.width : rect.height) / lineSizePx);
+
+    let lines = panel.querySelectorAll("[data-transition-col]");
+    const lineTemplate = lines[0];
+    const pixelTemplate = lineTemplate.querySelector("[data-transition-pixel]");
+
+    if (lines.length !== pixelHorizontalAmount) {
+      const frag = document.createDocumentFragment();
+      for (let i = 0; i < pixelHorizontalAmount; i++) {
+        frag.appendChild(lineTemplate.cloneNode(false));
+      }
+      panel.replaceChildren(frag);
+      lines = panel.querySelectorAll("[data-transition-col]");
+    }
+
+    lines.forEach((line) => {
+      line.style.flexDirection = isPortrait ? "row" : "column";
+      line.style.flex = "1 1 auto";
+      line.style.justifyContent = "center";
+
+      const diff = crossAmount - line.childElementCount;
+
+      if (diff > 0) {
+        const frag = document.createDocumentFragment();
+        for (let i = 0; i < diff; i++) {
+          frag.appendChild(pixelTemplate.cloneNode(true));
+        }
+        line.appendChild(frag);
+      } else if (diff < 0) {
+        for (let i = diff; i < 0; i++) {
+          line.lastElementChild.remove();
+        }
+      }
+    });
+  }
+
+  barba.hooks.beforeEnter((data) => {
+    gsap.set(data.next.container, {
+      position: "fixed",
+      top: 0,
+      left: 0,
+      right: 0
+    });
+
+    if (lenis && typeof lenis.stop === "function") {
+      lenis.stop();
+    }
+
+    initBeforeEnterFunctions(data.next.container);
+    applyThemeFrom(data.next.container);
+  });
+
+  barba.hooks.afterLeave((data) => {
+    if (hasScrollTrigger) {
+      ScrollTrigger.getAll().forEach((trigger) => trigger.kill());
+    }
+    destroyScope(data.current.container);
+  });
+
+  barba.hooks.enter((data) => {
+    initBarbaNavUpdate(data);
+  });
+
+  barba.hooks.afterEnter((data) => {
+    resetWebflow(data);
+    initAfterEnterFunctions(data.next.container);
+
+    if (hasLenis && lenis) {
+      lenis.resize();
+      lenis.start();
+    }
+
+    if (hasScrollTrigger) {
+      ScrollTrigger.refresh();
+    }
+  });
+
+  barba.init({
+    debug: true,
+    timeout: 7000,
+    preventRunning: true,
+    transitions: [
+      {
+        name: "default",
+        sync: true,
+
+        async once(data) {
+          initOnceFunctions();
+          initBeforeEnterFunctions(data.next.container);
+          applyThemeFrom(data.next.container);
+          const tl = runPageOnceAnimation(data.next.container);
+          initAfterEnterFunctions(data.next.container);
+          return tl;
+        },
+
+        async leave(data) {
+          return runPageLeaveAnimation(data.current.container, data.next.container);
+        },
+
+        async enter(data) {
+          return runPageEnterAnimation(data.next.container);
+        }
+      }
+    ]
+  });
+
+  const themeConfig = {
+    light: {
+      nav: "dark",
+      transition: "light"
+    },
+    dark: {
+      nav: "light",
+      transition: "dark"
+    }
+  };
+
+  function applyThemeFrom(container) {
+    const pageTheme = container?.dataset?.pageTheme || "light";
+    const config = themeConfig[pageTheme] || themeConfig.light;
+
+    document.body.dataset.pageTheme = pageTheme;
+    const transitionEl = document.querySelector("[data-theme-transition]");
+    if (transitionEl) {
+      transitionEl.dataset.themeTransition = config.transition;
+    }
+
+    const nav = document.querySelector("[data-theme-nav]");
+    if (nav) {
+      nav.dataset.themeNav = config.nav;
+    }
+  }
+
+  function initLenis() {
+    if (lenis) return;
+    if (!hasLenis) return;
+
+    lenis = new Lenis({
+      lerp: 0.165,
+      wheelMultiplier: 1.25
+    });
+
+    if (hasScrollTrigger) {
+      lenis.on("scroll", ScrollTrigger.update);
+    }
+
+    gsap.ticker.add((time) => {
+      lenis.raf(time * 1000);
+    });
+
+    gsap.ticker.lagSmoothing(0);
+  }
+
+  function resetPage(container) {
+    window.scrollTo(0, 0);
+    gsap.set(container, { clearProps: "position,top,left,right" });
+
+    if (hasLenis && lenis) {
+      lenis.resize();
+      lenis.start();
+    }
+  }
+
+  function debounceOnWidthChange(fn, ms) {
+    let last = innerWidth;
+    let timer;
+    return function (...args) {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        if (innerWidth !== last) {
+          last = innerWidth;
+          fn.apply(this, args);
+        }
+      }, ms);
+    };
+  }
+
+  function isPersistent(el) {
+    return !el.closest('[data-barba="container"]');
+  }
+
+  function initBarbaNavUpdate(data) {
+    const tpl = document.createElement("template");
+    tpl.innerHTML = data.next.html.trim();
+    const nextNodes = Array.from(tpl.content.querySelectorAll("[data-barba-update]")).filter(isPersistent);
+    const currentNodes = Array.from(document.querySelectorAll("[data-barba-update]")).filter(isPersistent);
+
+    currentNodes.forEach((curr, index) => {
+      const next = nextNodes[index];
+      if (!next) return;
+
+      const newStatus = next.getAttribute("aria-current");
+      if (newStatus !== null) {
+        curr.setAttribute("aria-current", newStatus);
+      } else {
+        curr.removeAttribute("aria-current");
+      }
+
+      const newClassList = next.getAttribute("class") || "";
+      curr.setAttribute("class", newClassList);
+    });
+  }
+
+  function resetWebflow(data) {
+    const dom = new DOMParser().parseFromString(data.next.html, "text/html");
+    const pageId = dom.documentElement.getAttribute("data-wf-page");
+    if (pageId) document.documentElement.setAttribute("data-wf-page", pageId);
+
+    if (window.Webflow) {
+      window.Webflow.destroy?.();
+      window.Webflow.ready?.();
+      window.Webflow.require?.("ix2")?.init?.();
+    }
+  }
+
+  function initMenuGrow() {
     document.querySelectorAll("[data-menu-grow]").forEach((el) => {
       const height = el.dataset.menuGrowHeight || "10rem";
       const duration = parseFloat(el.dataset.menuGrowDuration);
@@ -9,7 +461,7 @@
       const skipMobile = el.dataset.menuGrowMobile === "off";
 
       gsap.matchMedia().add(skipMobile ? "(min-width: 480px)" : "all", () => {
-        if (reduceMotion) {
+        if (reducedMotion) {
           gsap.set(el, { minHeight: height });
           return;
         }
@@ -24,37 +476,13 @@
     });
   }
 
-  function initAlignToMenu() {
-    const menu = document.querySelector("[data-align-menu-source]") || document.querySelector(".menu_wrapper");
-    const targets = document.querySelectorAll("[data-align-menu-bottom]");
-    if (!menu || !targets.length) return;
-
-    const mq = window.matchMedia("(min-width: 480px)");
-
-    const update = () => {
-      targets.forEach((el) => {
-        if (!mq.matches) {
-          el.style.minHeight = "";
-          return;
-        }
-        const height = menu.getBoundingClientRect().bottom - el.getBoundingClientRect().top;
-        el.style.minHeight = Math.max(0, height) + "px";
-      });
-    };
-
-    new ResizeObserver(update).observe(menu);
-    window.addEventListener("resize", update);
-    mq.addEventListener("change", update);
-    update();
-  }
-
-  function initTabsReveal(reduceMotion) {
+  function initTabsReveal() {
     document.querySelectorAll("[data-tabs-reveal]").forEach((wrapper) => {
       const tabs = wrapper.children;
       if (!tabs.length) return;
 
       gsap.set(tabs, { autoAlpha: 1 });
-      if (reduceMotion) return;
+      if (reducedMotion) return;
 
       const duration = parseFloat(wrapper.dataset.tabsRevealDuration);
       const stagger = parseFloat(wrapper.dataset.tabsRevealStagger);
@@ -75,10 +503,38 @@
     });
   }
 
-  function initScrambleOnLoad(reduceMotion) {
-    if (reduceMotion || typeof ScrambleTextPlugin === "undefined") return;
+  function initAlignToMenu(container, scope) {
+    const menu = document.querySelector("[data-align-menu-source]") || document.querySelector(".menu_wrapper");
+    const targets = container.querySelectorAll("[data-align-menu-bottom]");
+    if (!menu || !targets.length) return;
 
-    document.querySelectorAll('[data-scramble="load"]').forEach((target) => {
+    const mq = window.matchMedia("(min-width: 480px)");
+
+    const update = () => {
+      targets.forEach((el) => {
+        if (!mq.matches) {
+          el.style.minHeight = "";
+          return;
+        }
+        const height = menu.getBoundingClientRect().bottom - el.getBoundingClientRect().top;
+        el.style.minHeight = Math.max(0, height) + "px";
+      });
+    };
+
+    const observer = new ResizeObserver(update);
+    observer.observe(menu);
+    targets.forEach((el) => observer.observe(el));
+    scope.cleanups.push(() => observer.disconnect());
+
+    listen(scope, window, "resize", update);
+    listen(scope, mq, "change", update);
+    update();
+  }
+
+  function initScrambleOnLoad(container) {
+    if (reducedMotion || typeof ScrambleTextPlugin === "undefined") return;
+
+    container.querySelectorAll('[data-scramble="load"]').forEach((target) => {
       const split = SplitText.create(target, {
         type: "words, chars",
         wordsClass: "word",
@@ -88,6 +544,7 @@
       gsap.to(split.words, {
         duration: 1.2,
         stagger: 0.01,
+        ease: "power1.out",
         scrambleText: {
           text: "{original}",
           chars: "upperCase",
@@ -104,10 +561,10 @@
     chars: { duration: 0.4, stagger: 0.01 }
   };
 
-  function initMaskTextScrollReveal(reduceMotion) {
-    document.querySelectorAll('[data-split="heading"]').forEach((heading) => {
+  function initMaskTextScrollReveal(container) {
+    container.querySelectorAll('[data-split="heading"]').forEach((heading) => {
       gsap.set(heading, { autoAlpha: 1 });
-      if (reduceMotion) return;
+      if (reducedMotion) return;
 
       const type = splitConfig[heading.dataset.splitReveal] ? heading.dataset.splitReveal : "lines";
       const typesToSplit =
@@ -138,7 +595,7 @@
             ease: "expo.out"
           };
 
-          if (!inViewOnLoad) {
+          if (!inViewOnLoad && hasScrollTrigger) {
             vars.scrollTrigger = {
               trigger: heading,
               start: "clamp(top 80%)",
@@ -152,11 +609,11 @@
     });
   }
 
-  function initHighlightMarkerTextReveal(reduceMotion) {
-    const elements = document.querySelectorAll("[data-highlight-marker-reveal]");
+  function initHighlightMarkerTextReveal(container, scope) {
+    const elements = container.querySelectorAll("[data-highlight-marker-reveal]");
     if (!elements.length) return;
 
-    if (reduceMotion) {
+    if (reducedMotion) {
       gsap.set(elements, { autoAlpha: 1 });
       return;
     }
@@ -203,19 +660,11 @@
       return bar;
     }
 
-    function cleanupElement(el) {
-      if (!el._highlightMarkerReveal) return;
-      el._highlightMarkerReveal.timeline?.kill();
-      el._highlightMarkerReveal.delayedCall?.kill();
-      el._highlightMarkerReveal.observer?.disconnect();
-      el._highlightMarkerReveal.split?.revert();
-      el.querySelectorAll(".highlight-marker-bar").forEach((bar) => bar.remove());
-      delete el._highlightMarkerReveal;
-    }
+    scope.cleanups.push(() => {
+      elements.forEach((el) => el._highlightMarkerReveal?.observer?.disconnect());
+    });
 
     elements.forEach((el) => {
-      cleanupElement(el);
-
       const direction = el.getAttribute("data-marker-direction") || defaults.direction;
       const theme = el.getAttribute("data-marker-theme") || defaults.theme;
       const scrollStart = el.getAttribute("data-marker-scroll-start") || defaults.scrollStart;
@@ -294,7 +743,7 @@
     });
   }
 
-  function initCascadingSlider() {
+  function initCascadingSlider(container, scope) {
     const duration = 0.65;
     const ease = "power3.inOut";
 
@@ -305,14 +754,14 @@
       { maxWidth: Infinity, activeWidth: 0.60, siblingWidth: 0.13 }
     ];
 
-    document.querySelectorAll("[data-cascading-slider-wrap]").forEach(setupInstance);
+    container.querySelectorAll("[data-cascading-slider-wrap]").forEach(setupInstance);
 
     function setupInstance(wrapper) {
       const viewport = wrapper.querySelector("[data-cascading-viewport]");
       if (!viewport) return;
 
-      const prevButton = wrapper.querySelector("[data-cascading-slider-prev]") || document.querySelector("[data-cascading-slider-prev]");
-      const nextButton = wrapper.querySelector("[data-cascading-slider-next]") || document.querySelector("[data-cascading-slider-next]");
+      const prevButton = wrapper.querySelector("[data-cascading-slider-prev]") || container.querySelector("[data-cascading-slider-prev]");
+      const nextButton = wrapper.querySelector("[data-cascading-slider-next]") || container.querySelector("[data-cascading-slider-next]");
       const slides = Array.from(viewport.querySelectorAll("[data-cascading-slide]"));
       const originalTotal = slides.length;
       let totalSlides = slides.length;
@@ -340,12 +789,12 @@
 
       const pad = (num) => (num < 10 ? "0" + num : String(num));
 
-      document.querySelectorAll('[data-slide-count="total"]').forEach((el) => {
+      container.querySelectorAll('[data-slide-count="total"]').forEach((el) => {
         el.textContent = pad(originalTotal);
       });
 
       const stepGroups = [];
-      document.querySelectorAll('[data-slide-count="step"]').forEach((stepElement) => {
+      container.querySelectorAll('[data-slide-count="step"]').forEach((stepElement) => {
         const parent = stepElement.parentElement;
         if (!parent || parent.hasAttribute("data-slide-count-ready")) return;
         parent.setAttribute("data-slide-count-ready", "");
@@ -381,6 +830,7 @@
       if (stepGroups.length) {
         const counterObserver = new ResizeObserver(sizeCounter);
         stepGroups.forEach((group) => counterObserver.observe(group.steps[0]));
+        scope.cleanups.push(() => counterObserver.disconnect());
         sizeCounter();
       }
 
@@ -536,15 +986,19 @@
         });
       }
 
-      if (prevButton) prevButton.addEventListener("click", (event) => {
-        event.preventDefault();
-        goTo(activeIndex - 1);
-      });
+      if (prevButton) {
+        listen(scope, prevButton, "click", (event) => {
+          event.preventDefault();
+          goTo(activeIndex - 1);
+        });
+      }
 
-      if (nextButton) nextButton.addEventListener("click", (event) => {
-        event.preventDefault();
-        goTo(activeIndex + 1);
-      });
+      if (nextButton) {
+        listen(scope, nextButton, "click", (event) => {
+          event.preventDefault();
+          goTo(activeIndex + 1);
+        });
+      }
 
       slides.forEach((slide, index) => {
         slide.addEventListener("click", () => {
@@ -552,57 +1006,24 @@
         });
       });
 
-      document.addEventListener("keydown", (event) => {
+      listen(scope, document, "keydown", (event) => {
         if (event.key === "ArrowLeft") goTo(activeIndex - 1);
         if (event.key === "ArrowRight") goTo(activeIndex + 1);
       });
 
       let resizeTimer;
-      window.addEventListener("resize", () => {
+      listen(scope, window, "resize", () => {
         clearTimeout(resizeTimer);
         resizeTimer = setTimeout(() => {
           measure();
           layout(false);
         }, 100);
       });
+      scope.cleanups.push(() => clearTimeout(resizeTimer));
 
       measure();
       layout(false);
       updateCounter(false);
     }
-  }
-
-  function init() {
-    if (typeof gsap === "undefined") {
-      console.warn("GSAP not found");
-      return;
-    }
-
-    const plugins = [
-      typeof ScrollTrigger !== "undefined" ? ScrollTrigger : null,
-      typeof SplitText !== "undefined" ? SplitText : null,
-      typeof ScrambleTextPlugin !== "undefined" ? ScrambleTextPlugin : null
-    ].filter(Boolean);
-
-    gsap.registerPlugin(...plugins);
-
-    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-
-    initMenuGrow(reduceMotion);
-    initAlignToMenu();
-    initTabsReveal(reduceMotion);
-    initCascadingSlider();
-
-    document.fonts.ready.then(() => {
-      initScrambleOnLoad(reduceMotion);
-      initMaskTextScrollReveal(reduceMotion);
-      initHighlightMarkerTextReveal(reduceMotion);
-    });
-  }
-
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", init);
-  } else {
-    init();
   }
 })();
