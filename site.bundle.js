@@ -1126,15 +1126,22 @@
       return;
     }
 
-    const isPortrait = window.innerHeight > window.innerWidth;
-    pixelGrid(isPortrait);
+    const direction = wrap.getAttribute("data-loader") || "up";
+    const vertical = direction !== "right";
+    pixelGrid(vertical);
 
-    const lines = Array.from(panel.querySelectorAll("[data-transition-col]"));
+    let lines = Array.from(panel.querySelectorAll("[data-transition-col]"));
+    if (direction !== "down" && direction !== "right") lines = lines.reverse();
     const allPixels = panel.querySelectorAll("[data-transition-pixel]");
 
     const overlap = Math.max(0, Math.min(1, pixelOverlap));
     const clipFrom = "polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%)";
-    const clipTo = isPortrait ? "polygon(0% 100%, 100% 100%, 100% 100%, 0% 100%)" : "polygon(100% 0%, 100% 0%, 100% 100%, 100% 100%)";
+    const clipTargets = {
+      up: "polygon(0% 0%, 100% 0%, 100% 0%, 0% 0%)",
+      down: "polygon(0% 100%, 100% 100%, 100% 100%, 0% 100%)",
+      right: "polygon(100% 0%, 100% 0%, 100% 100%, 100% 100%)"
+    };
+    const clipTo = clipTargets[direction] || clipTargets.up;
     const clipStart = Math.min(pixelFadeDuration, transitionDuration * 0.5);
     const clipDuration = Math.max(0.001, transitionDuration - 2 * clipStart);
     const stepDur = clipDuration / Math.max(1, pixelHorizontalAmount);
