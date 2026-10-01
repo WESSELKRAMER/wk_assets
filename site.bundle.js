@@ -958,6 +958,59 @@
       updateCounter(false);
     }
   }
+  const THEME_VAR_PREFIX = document.body.dataset.themePrefix || "--_themes---";
+  const THEME_DURATION = 1;
+  let themeWarningShown = false;
+
+  function getThemeVarNames() {
+    const names = [];
+    const computed = getComputedStyle(document.body);
+    for (let i = 0; i < computed.length; i++) {
+      const name = computed[i];
+      if (name.startsWith(THEME_VAR_PREFIX)) names.push(name);
+    }
+    return names;
+  }
+
+  function syncBodyTheme(data) {
+    const body = document.body;
+    const dom = new DOMParser().parseFromString(data.next.html, "text/html");
+    const nextClass = dom.body.getAttribute("class") || "";
+    const currentClass = body.getAttribute("class") || "";
+    if (nextClass === currentClass) return;
+
+    const names = getThemeVarNames();
+
+    if (!names.length && !themeWarningShown) {
+      themeWarningShown = true;
+      console.warn(`[main.js] No CSS variables starting with "${THEME_VAR_PREFIX}" found on body, theme switches without animation`);
+    }
+
+    const fromStyle = getComputedStyle(body);
+    const from = {};
+    names.forEach((name) => (from[name] = fromStyle.getPropertyValue(name).trim()));
+
+    gsap.killTweensOf(body);
+    names.forEach((name) => body.style.removeProperty(name));
+    body.setAttribute("class", nextClass);
+
+    if (reducedMotion || !names.length) return;
+
+    const toStyle = getComputedStyle(body);
+    const to = {};
+    names.forEach((name) => {
+      to[name] = toStyle.getPropertyValue(name).trim();
+      body.style.setProperty(name, from[name]);
+    });
+
+    gsap.to(body, {
+      ...to,
+      duration: THEME_DURATION,
+      ease: "power2.inOut",
+      onComplete: () => names.forEach((name) => body.style.removeProperty(name))
+    });
+  }
+
   function startWithoutBarba(reason) {
     console.warn("[main.js] Barba disabled: " + reason);
     const container = document.querySelector('[data-barba="container"]') || document;
@@ -980,6 +1033,7 @@
       lenis.stop();
     }
 
+    syncBodyTheme(data);
     initBeforeEnterFunctions(data.next.container);
     applyThemeFrom(data.next.container);
   });
